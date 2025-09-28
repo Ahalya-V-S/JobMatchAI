@@ -33,6 +33,10 @@ class ContentBasedFilter:
     
     def _create_tfidf_features(self):
         """Create TF-IDF features from job descriptions and titles"""
+        if self.data is None:
+            st.error("No data available for TF-IDF feature creation")
+            return
+            
         # Combine title, description, and skills for text analysis
         text_features = []
         
@@ -78,6 +82,10 @@ class ContentBasedFilter:
     
     def _create_feature_matrix(self):
         """Create numerical feature matrix for additional similarity"""
+        if self.data is None:
+            st.error("No data available for feature matrix creation")
+            return
+            
         features = []
         
         for idx in self.data.index:
@@ -125,6 +133,9 @@ class ContentBasedFilter:
     
     def get_content_similarity(self, job_idx1, job_idx2):
         """Calculate content similarity between two jobs"""
+        if self.tfidf_matrix is None or self.feature_matrix is None:
+            return 0.0
+            
         # Get TF-IDF similarity
         tfidf_sim = cosine_similarity(
             self.tfidf_matrix[job_idx1:job_idx1+1],
@@ -149,6 +160,8 @@ class ContentBasedFilter:
         
         # Create user profile vector
         user_text = self._create_user_text_profile(user_profile)
+        if self.tfidf_vectorizer is None:
+            return None
         user_vector = self.tfidf_vectorizer.transform([user_text])
         
         # Calculate similarities with all jobs
@@ -248,6 +261,8 @@ class ContentBasedFilter:
     
     def _apply_user_constraints(self, user_profile):
         """Apply hard constraints based on user preferences"""
+        if self.data is None:
+            return set()
         valid_jobs = set(range(len(self.data)))
         
         # Location constraint

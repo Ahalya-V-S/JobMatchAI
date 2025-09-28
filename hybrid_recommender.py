@@ -258,7 +258,7 @@ class HybridRecommender:
         
         # Rename score column appropriately
         if not merged_df.empty:
-            merged_df = merged_df[['job_idx', 'score']].rename(columns={'score': 'hybrid_score'})
+            merged_df = merged_df[['job_idx', 'score']].rename({'score': 'hybrid_score'}, axis=1)
         
         return merged_df
     

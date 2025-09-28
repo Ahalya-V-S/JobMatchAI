@@ -64,7 +64,8 @@ class CollaborativeFilter:
         
         for user_id in range(n_users):
             # Assign archetype to user
-            archetype = np.random.choice(user_archetypes)
+            archetype_idx = np.random.randint(0, len(user_archetypes))
+            archetype = user_archetypes[archetype_idx]
             
             # Each user interacts with 10-30 jobs
             n_interactions = np.random.randint(10, 31)
@@ -208,7 +209,8 @@ class CollaborativeFilter:
     
     def recommend(self, user_profile, n_recommendations=10):
         """Generate collaborative filtering recommendations"""
-        if self.svd_model is None or self.user_factors is None:
+        if (self.svd_model is None or self.user_factors is None or 
+            self.user_item_matrix is None or self.reverse_item_mapper is None):
             return None
         
         # Create synthetic user based on profile
@@ -283,6 +285,9 @@ class CollaborativeFilter:
     
     def _find_matching_jobs(self, user_profile):
         """Find jobs that match user profile for creating synthetic user"""
+        if self.data is None:
+            return []
+            
         matching_jobs = []
         
         # Look for jobs that match user preferences
@@ -319,7 +324,8 @@ class CollaborativeFilter:
     
     def get_user_similarities(self, user_id):
         """Get similar users to a given user"""
-        if self.user_factors is None or user_id not in self.user_mapper:
+        if (self.user_factors is None or user_id not in self.user_mapper or 
+            self.reverse_user_mapper is None):
             return None
         
         user_idx = self.user_mapper[user_id]
@@ -340,7 +346,8 @@ class CollaborativeFilter:
     
     def get_item_similarities(self, job_id):
         """Get similar items to a given job"""
-        if self.item_factors is None or job_id not in self.item_mapper:
+        if (self.item_factors is None or job_id not in self.item_mapper or 
+            self.reverse_item_mapper is None):
             return None
         
         item_idx = self.item_mapper[job_id]

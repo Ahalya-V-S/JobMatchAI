@@ -107,6 +107,8 @@ class KnowledgeBasedFilter:
     
     def _apply_hard_constraints(self, user_profile):
         """Apply mandatory constraints that cannot be violated"""
+        if self.data is None:
+            return pd.DataFrame()
         filtered_data = self.data.copy()
         
         # Salary constraints (hard constraint)
@@ -143,6 +145,8 @@ class KnowledgeBasedFilter:
     
     def _apply_soft_constraints(self, user_profile):
         """Apply relaxed constraints when hard constraints are too restrictive"""
+        if self.data is None:
+            return pd.DataFrame()
         filtered_data = self.data.copy()
         
         # Relax salary constraints (allow 20% deviation)
