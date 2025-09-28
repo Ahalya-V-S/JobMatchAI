@@ -1,0 +1,29 @@
+Objective: Implementing a standalone, HYBRID recommender system for any domain of your choice, using any combinations of the standard techniques (CF/CB/KB) using only open source tools/platforms on freely available datasets.(For Ex: Combining CF and KB by separate implementations and doing a later fusion by weighted aggregate)
+
+Components of RS: UI module, query module, relevance/ranking module, prediction module, data store. (Modules and their composition might vary depending on the technique.)
+
+Datasets and Description: provide a brief description of datasets and choose datasets that are conducive for hybridization and not toy datasets.
+
+Data Analytics and Visualization: Use any open source analytics tools/frameworks for performing any required analytics and visualization on your dataset (Ex: posthog, metabase, superset, powerBI, Rapidminer, KNIME, matomo etc., or just R/Python - matplotlib or equivalent)
+
+Data stores: Typical RDBMS or nosql
+
+Query language: Hive / Pig / Sql/…
+
+Implementation type: standalone, Hybrid, with any combination of tools/frameworks/platform on datasets of feasible size.
+
+Documentation: with title, team no., members of the team and their roll no.s, and should contain a brief description of the objective, architecture, platform/tools/language used, choice of RS type, Description of datasets, preprocessing if any, datastores and its type, query languages and queries, Description of methodology, code snippets, screen shots, core references, any other relevant information. Should not exceed 10 pages. (to be submitted separately on MS TEAMS – 1 File per team in pdf format only)
+
+Evaluation parameters: Based on complexity, implementation, analytics and visualization, understanding, documentation.
+
+
+General Instructions:
+
+
+
+Some Topics (but not limited to): recommending a news article, book, travel itenerary, medical treatment, college and course for study / careers, diet plan, personalization, data security, shares/market, Recommending content for differently abled
+NO TWO TOPICS SHALL OVERLAP
+
+The same/part shall not be used for assignment submissions elsewhere
+
+Possible work flow:  Define the problem, choose dataset, install required libraries (if python - pandas, numpy, scikit learn etc.,), load and preprocess data, do some visualizations and analytics on data, implement (say TF-IDF/Matrix Factorization and do a prediction, and implement KB with constraints that the user can modify and use similarity metrics like cosine etc., and form a hybrid of these two by weighted averaging or switching or some other technique), create a UI, evaluate the system for its expected outcome. 
