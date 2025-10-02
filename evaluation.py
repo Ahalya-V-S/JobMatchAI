@@ -7,12 +7,7 @@ warnings.filterwarnings('ignore')
 
 
 class Evaluator:
-    """Evaluation metrics for job recommendation systems using dataset columns:
-       ['job_link', 'last_processed_time', 'got_summary', 'got_ner',
-        'is_being_worked', 'job_title', 'company', 'job_location', 'first_seen',
-        'search_city', 'search_country', 'search_position', 'job_level',
-        'job_type']
-    """
+    """Evaluation metrics for the updated HybridRecommender system."""
 
     def __init__(self, data):
         self.data = data
@@ -21,7 +16,7 @@ class Evaluator:
         self._prepare_test_data()
 
     def _prepare_test_data(self):
-        """Generate synthetic test users"""
+        """Generate synthetic test users based on dataset."""
         np.random.seed(42)
         n_test_users = 50
         test_users = []
@@ -58,16 +53,10 @@ class Evaluator:
     def _generate_ground_truth(self):
         """Generate ground truth interactions for test users"""
         ground_truth = []
-
         for user in self.test_users:
             relevant_jobs = self._find_relevant_jobs(user)
             for job_idx in relevant_jobs:
-                ground_truth.append({
-                    'user_id': user['user_id'],
-                    'job_idx': job_idx,
-                    'relevant': 1
-                })
-
+                ground_truth.append({'user_id': user['user_id'], 'job_idx': job_idx, 'relevant': 1})
         self.test_interactions = pd.DataFrame(ground_truth)
 
     def _find_relevant_jobs(self, user_profile):
@@ -101,23 +90,22 @@ class Evaluator:
 
         return relevant_jobs[:20]
 
+    # ----------------- Evaluation Metrics -----------------
+
     def evaluate_precision_recall(self, recommender, k=10):
-        """Evaluate precision and recall at k"""
         precisions = []
         recalls = []
 
         for user in self.test_users:
             user_id = user['user_id']
-            user_truth = self.test_interactions[
-                self.test_interactions['user_id'] == user_id
-            ]['job_idx'].tolist()
+            user_truth = self.test_interactions[self.test_interactions['user_id'] == user_id]['job_idx'].tolist()
 
             if not user_truth:
                 continue
 
             try:
                 recommendations = recommender.recommend(user, n_recommendations=k)
-                if recommendations is None or len(recommendations) == 0:
+                if recommendations is None or recommendations.empty:
                     precisions.append(0)
                     recalls.append(0)
                     continue
@@ -141,7 +129,6 @@ class Evaluator:
         return avg_precision, avg_recall
 
     def evaluate_diversity(self, recommender, k=10):
-        """Evaluate diversity as ratio of unique recommended items"""
         all_recommendations = []
         for user in self.test_users[:20]:
             try:
@@ -157,7 +144,6 @@ class Evaluator:
         return len(set(all_recommendations)) / len(all_recommendations)
 
     def evaluate_coverage(self, recommender, k=10):
-        """Evaluate catalog coverage"""
         recommended_items = set()
         for user in self.test_users[:20]:
             try:
@@ -171,7 +157,6 @@ class Evaluator:
         return len(recommended_items) / total_items if total_items > 0 else 0
 
     def evaluate_novelty(self, recommender, k=10):
-        """Evaluate novelty based on item popularity"""
         item_popularity = {}
         if hasattr(self, 'test_interactions') and self.test_interactions is not None:
             popularity_counts = self.test_interactions['job_idx'].value_counts()
@@ -198,7 +183,6 @@ class Evaluator:
         return np.mean(novelty_scores) if novelty_scores else 0
 
     def evaluate_serendipity(self, recommender, k=10):
-        """Evaluate serendipity as unexpected but relevant recommendations"""
         serendipity_scores = []
         for user in self.test_users[:10]:
             try:
@@ -225,8 +209,9 @@ class Evaluator:
 
         return np.mean(serendipity_scores) if serendipity_scores else 0
 
+    # ----------------- Helper functions -----------------
+
     def _create_user_profile_vector(self, user):
-        """Vectorize user profile: job_level, job_type, location, keywords"""
         vector = []
 
         level_mapping = {lvl: i+1 for i, lvl in enumerate(self.data['job_level'].dropna().unique())}
@@ -235,15 +220,11 @@ class Evaluator:
         type_mapping = {t: i+1 for i, t in enumerate(self.data['job_type'].dropna().unique())}
         vector.append(type_mapping.get(user.get('preferred_job_type'), 0))
 
-        # Location: hash to numeric
         vector.append(hash(user.get('job_location', 'Any')) % 100 / 100)
-
-        # Keyword count
         vector.append(len(user.get('keywords', [])))
         return vector
 
     def _create_job_vector(self, job):
-        """Vectorize job: level, type, location, title/company keyword count"""
         vector = []
 
         level_mapping = {lvl: i+1 for i, lvl in enumerate(self.data['job_level'].dropna().unique())}
@@ -259,7 +240,6 @@ class Evaluator:
         return vector
 
     def _calculate_simple_relevance(self, job, user):
-        """Simplified relevance for serendipity calculation"""
         relevance = 0
         if job.get('job_level') == user.get('preferred_job_level'):
             relevance += 0.4
@@ -274,5 +254,3 @@ class Evaluator:
         relevance += min(0.1, 0.05 * keyword_matches)
 
         return min(1.0, relevance)
-
-    # Evaluation methods for all systems and report generation remain same, no changes needed.

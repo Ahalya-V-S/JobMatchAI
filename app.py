@@ -49,7 +49,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data
+@st.cache_data(hash_funcs={pd.DataFrame: lambda _: None})
 def load_and_preprocess_data():
     """Load and preprocess the LinkedIn jobs dataset"""
     loader = DataLoader()
@@ -64,7 +64,7 @@ def load_and_preprocess_data():
         processed_data = preprocessor.preprocess(data)
         return processed_data
     return None
-
+@st.cache_data(hash_funcs={pd.DataFrame: lambda _: None})
 def initialize_recommenders(data):
     """Initialize all recommendation systems"""
     cb_filter = ContentBasedFilter()
@@ -253,131 +253,89 @@ def show_analytics_page(data):
     #     fig_skills.update_layout(yaxis={'categoryorder': 'total ascending'})
     #     st.plotly_chart(fig_skills, use_container_width=True)
 
+
 def show_recommendations_page(data, hybrid):
     st.markdown('<div class="section-header">🎯 Get Personalized Job Recommendations</div>', unsafe_allow_html=True)
     
     # User input form
     st.markdown("#### Tell us about yourself and your preferences:")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Basic preferences
         st.markdown("**Basic Information**")
-        experience_level = st.selectbox("Experience Level", 
-                                      ["Entry level", "Associate", "Mid-Senior level", "Director", "Executive"])
+        preferred_location = st.selectbox(
+            "Preferred Location", 
+            ["Any"] + sorted(data['job_location'].dropna().unique().tolist())
+        )
         
-        preferred_location = st.selectbox("Preferred Location", 
-                                        ["Any"] + sorted(data['job_location'].dropna().unique().tolist()))
+        job_type = st.selectbox(
+            "Job Type Preference", 
+            ["Any"] + sorted(data['job_type'].dropna().unique().tolist())
+        )
         
-        job_type = st.selectbox("Job Type Preference", 
-                              ["Any", "Full-time", "Part-time", "Contract", "Temporary", "Internship"])
-        
-        # Salary preferences
-        st.markdown("**Salary Expectations**")
-        min_salary = st.number_input("Minimum Salary ($)", min_value=0, value=50000, step=5000)
-        max_salary = st.number_input("Maximum Salary ($)", min_value=min_salary, value=150000, step=5000)
-    
-    with col2:
-        # Skills and interests
-        st.markdown("**Skills and Interests**")
-        
-        # Get available skills from data
-        all_skills = []
-        if 'skills' in data.columns:
-            for skills_str in data['skills'].dropna():
-                if isinstance(skills_str, str):
-                    all_skills.extend([skill.strip() for skill in skills_str.split(',')])
-        
-        unique_skills = sorted(list(set(all_skills)))[:100]  # Limit to top 100 skills
-        
-        selected_skills = st.multiselect("Select your key skills (max 10)", 
-                                       unique_skills, max_selections=10)
-        
-        industry_preference = st.text_input("Industry Preference (optional)", 
-                                          placeholder="e.g., Technology, Healthcare, Finance")
-        
-        company_size_pref = st.selectbox("Company Size Preference", 
-                                       ["Any", "Startup (1-50)", "Small (51-200)", 
-                                        "Medium (201-1000)", "Large (1000+)"])
-    
-    # Recommendation weights
+        job_level = st.selectbox(
+            "Job Level Preference",
+            ["Any"] + sorted(data['job_level'].dropna().unique().tolist())
+        )
+
     st.markdown("#### Customize Recommendation Approach")
     col1, col2, col3 = st.columns(3)
-    
     with col1:
-        cb_weight = st.slider("Content-Based Weight", 0.0, 1.0, 0.4, 0.1,
-                             help="Focus on job content similarity")
+        cb_weight = st.slider("Content-Based Weight", 0.0, 1.0, 0.4, 0.1)
     with col2:
-        cf_weight = st.slider("Collaborative Weight", 0.0, 1.0, 0.3, 0.1,
-                             help="Focus on what similar users liked")
+        cf_weight = st.slider("Collaborative Weight", 0.0, 1.0, 0.3, 0.1)
     with col3:
-        kb_weight = st.slider("Knowledge-Based Weight", 0.0, 1.0, 0.3, 0.1,
-                             help="Focus on matching your constraints")
-    
+        kb_weight = st.slider("Knowledge-Based Weight", 0.0, 1.0, 0.3, 0.1)
+
     # Normalize weights
     total_weight = cb_weight + cf_weight + kb_weight
     if total_weight > 0:
         cb_weight /= total_weight
         cf_weight /= total_weight
         kb_weight /= total_weight
-    
-    # Generate recommendations
+
     if st.button("🔍 Get My Job Recommendations", type="primary"):
         with st.spinner("Generating personalized recommendations..."):
-            
-            # Create user profile
+
+            # Build user profile
             user_profile = {
-                'experience_level': experience_level,
                 'location': preferred_location if preferred_location != "Any" else None,
                 'job_type': job_type if job_type != "Any" else None,
-                'min_salary': min_salary,
-                'max_salary': max_salary,
-                'skills': selected_skills,
-                'industry': industry_preference if industry_preference else None,
-                'company_size': company_size_pref if company_size_pref != "Any" else None
+                'job_level': job_level if job_level != "Any" else None
             }
-            
+
+            # Filter dataset for required columns
+            data_filtered = data.dropna(subset=['job_location', 'job_type', 'job_level']).reset_index(drop=True)
+
             # Get recommendations
             recommendations = hybrid.recommend(
-                user_profile, 
+                user_profile,
                 n_recommendations=10,
                 weights={'content': cb_weight, 'collaborative': cf_weight, 'knowledge': kb_weight}
             )
-            
-            if recommendations is not None and len(recommendations) > 0:
+
+            if recommendations is not None and not recommendations.empty:
                 st.success(f"Found {len(recommendations)} job recommendations for you!")
-                
-                # Display recommendations
-                for idx, (job_idx, score) in enumerate(recommendations.iterrows()):
-                    job = data.iloc[job_idx]
-                    
-                    with st.expander(f"🎯 {idx+1}. {job['title']} at {job['company']} (Match: {score:.1%})"):
+
+                for idx, row in recommendations.iterrows():
+                    job_idx = row.name  # index in filtered dataset
+                    job = data_filtered.iloc[job_idx]
+
+                    score_value = float(row['score']) if 'score' in row else float(row.iloc[0])
+
+                    with st.expander(f"🎯 {idx+1}. {job['job_title']} at {job['company']} (Match: {score_value:.1%})"):
                         col1, col2 = st.columns([2, 1])
-                        
                         with col1:
                             st.markdown(f"**📍 Location:** {job['job_location']}")
-                            if pd.notna(job.get('experience_level')):
-                                st.markdown(f"**📊 Experience:** {job['experience_level']}")
-                            if pd.notna(job.get('employment_type')):
-                                st.markdown(f"**💼 Type:** {job['employment_type']}")
-                            
-                            if pd.notna(job.get('description')):
-                                description = str(job['description'])[:300] + "..." if len(str(job['description'])) > 300 else str(job['description'])
-                                st.markdown(f"**📝 Description:** {description}")
-                            
-                            if pd.notna(job.get('skills')):
-                                st.markdown(f"**🛠️ Required Skills:** {job['skills']}")
-                        
+                            st.markdown(f"**📊 Level:** {job['job_level']}")
+                            st.markdown(f"**💼 Type:** {job['job_type']}")
                         with col2:
-                            if pd.notna(job.get('salary_min')) and pd.notna(job.get('salary_max')):
-                                st.markdown(f"**💰 Salary Range:**")
-                                st.markdown(f"${job['salary_min']:,.0f} - ${job['salary_max']:,.0f}")
-                            
-                            if pd.notna(job.get('application_url')):
-                                st.markdown(f"**🔗 Apply:** [View Job]({job['application_url']})")
+                            if pd.notna(job.get('job_link')):
+                                st.markdown(f"**🔗 Apply:** [View Job]({job['job_link']})")
             else:
                 st.warning("No jobs found matching your criteria. Try adjusting your preferences.")
+
 
 def show_evaluation_page(data, cb_filter, cf_filter, kb_filter, hybrid):
     st.markdown('<div class="section-header">📈 System Evaluation Dashboard</div>', unsafe_allow_html=True)

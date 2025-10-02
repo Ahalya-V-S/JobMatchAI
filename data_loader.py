@@ -7,7 +7,7 @@ import shutil
 class DataLoader:
     """Handles downloading, caching, and loading LinkedIn jobs datasets from Kaggle"""
 
-    def __init__(self, cache_dir="data_cache/2"):
+    def __init__(self, cache_dir="data_cache/2/2"):
         self.cache_dir = cache_dir
         self.dataset_path = None
         self.data = None

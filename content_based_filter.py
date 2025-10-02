@@ -25,13 +25,13 @@ class ContentBasedFilter:
         # 1. Process text features using TF-IDF
         self._create_tfidf_features()
         
-        # 2. Process categorical and numerical features
+        # 2. Process numerical/categorical features
         self._create_feature_matrix()
         
         st.success("Content-Based Filter training completed!")
-    
+
     def _create_tfidf_features(self):
-        """Create TF-IDF features from job descriptions and titles"""
+        """Create TF-IDF features from job description and location"""
         if self.data is None:
             st.error("No data available for TF-IDF feature creation")
             return
@@ -43,24 +43,18 @@ class ContentBasedFilter:
             text_parts = []
 
             if pd.notna(job.get('title')):
-                text_parts.extend([str(job['title'])]*3)
+                text_parts.append(str(job['title']))
             if pd.notna(job.get('description')):
                 text_parts.append(str(job['description']))
-            if pd.notna(job.get('skills')):
-                text_parts.extend([str(job['skills'])]*2)
-            if pd.notna(job.get('company')):
-                text_parts.append(str(job['company']))
-            if pd.notna(job.get('location')):
-                text_parts.append(str(job['location']))
+            if pd.notna(job.get('job_location')):
+                text_parts.append(str(job['job_location']))
+            if pd.notna(job.get('job_type')):
+                text_parts.append(str(job['job_type']))
+            if pd.notna(job.get('job_level')):
+                text_parts.append(str(job['job_level']))
 
             combined_text = ' '.join(text_parts)
-            text_features.append(combined_text)
-
-        # Remove empty strings
-        text_features = [doc.strip() for doc in text_features if doc.strip()]
-
-        if not text_features:
-            raise ValueError("No valid text data found for TF-IDF. Check your dataset columns.")
+            text_features.append(combined_text if combined_text.strip() else " ")
 
         self.tfidf_vectorizer = TfidfVectorizer(
             max_features=5000,
@@ -71,7 +65,7 @@ class ContentBasedFilter:
         )
         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(text_features)
         st.info(f"Created TF-IDF matrix with shape: {self.tfidf_matrix.shape}")
-    
+
     def _create_feature_matrix(self):
         """Create numerical feature matrix for additional similarity"""
         if self.data is None:
@@ -84,33 +78,22 @@ class ContentBasedFilter:
             job = self.data.loc[idx]
             job_features = []
 
-            # Salary features
+            # Salary
             salary_min = job.get('salary_min', 0) if pd.notna(job.get('salary_min')) else 0
             salary_max = job.get('salary_max', 0) if pd.notna(job.get('salary_max')) else 0
             salary_avg = (salary_min + salary_max)/2 if salary_max > 0 else 0
             job_features.extend([salary_min, salary_max, salary_avg])
 
-            # Experience level encoding
-            exp_level = job.get('experience_level', 'Unknown')
-            exp_mapping = {
-                'Entry level': 1,
-                'Associate': 2,
-                'Mid-Senior level': 3,
-                'Director': 4,
-                'Executive': 5,
-                'Unknown': 0
-            }
-            job_features.append(exp_mapping.get(exp_level, 0))
-
-            # Employment type one-hot
-            emp_type = job.get('employment_type', 'Unknown')
-            emp_types = ['Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship']
+            # Job type one-hot: Hybrid, Remote, Onsite
+            emp_type = job.get('job_type', 'Unknown')
+            emp_types = ['Hybrid', 'Remote', 'Onsite']
             for et in emp_types:
                 job_features.append(1 if emp_type == et else 0)
 
-            # Skills count
-            skills_count = job.get('skills_count', 0) if pd.notna(job.get('skills_count')) else 0
-            job_features.append(skills_count)
+            # Job level: Associate=1, Mid senior=2
+            job_level = job.get('job_level', 'Unknown')
+            level_mapping = {'Associate': 1, 'Mid senior': 2, 'Unknown': 0}
+            job_features.append(level_mapping.get(job_level, 0))
 
             # Remote flag
             is_remote = 1 if job.get('is_remote', False) else 0
@@ -118,27 +101,8 @@ class ContentBasedFilter:
 
             features.append(job_features)
 
-        # Normalize features
         self.feature_matrix = self.scaler.fit_transform(features)
         st.info(f"Created feature matrix with shape: {self.feature_matrix.shape}")
-    
-    def get_content_similarity(self, job_idx1, job_idx2):
-        """Calculate content similarity between two jobs"""
-        if self.tfidf_matrix is None or self.feature_matrix is None:
-            return 0.0
-
-        tfidf_sim = cosine_similarity(
-            self.tfidf_matrix[job_idx1:job_idx1+1],
-            self.tfidf_matrix[job_idx2:job_idx2+1]
-        )[0][0]
-
-        feature_sim = cosine_similarity(
-            self.feature_matrix[job_idx1:job_idx1+1],
-            self.feature_matrix[job_idx2:job_idx2+1]
-        )[0][0]
-
-        combined_sim = 0.7*tfidf_sim + 0.3*feature_sim
-        return combined_sim
 
     def recommend(self, user_profile, n_recommendations=10):
         """Generate content-based recommendations for a user profile"""
@@ -146,25 +110,17 @@ class ContentBasedFilter:
             return None
 
         user_text = self._create_user_text_profile(user_profile)
-        if self.tfidf_vectorizer is None:
-            return None
         user_vector = self.tfidf_vectorizer.transform([user_text])
 
         text_similarities = cosine_similarity(user_vector, self.tfidf_matrix)[0]
-
         user_features = self._create_user_feature_profile(user_profile)
         user_feature_vector = self.scaler.transform([user_features])
-
         feature_similarities = cosine_similarity(user_feature_vector, self.feature_matrix)[0]
 
         combined_similarities = 0.7*text_similarities + 0.3*feature_similarities
-
         valid_jobs = self._apply_user_constraints(user_profile)
 
-        filtered_similarities = [
-            (idx, sim) for idx, sim in enumerate(combined_similarities) if idx in valid_jobs
-        ]
-
+        filtered_similarities = [(idx, sim) for idx, sim in enumerate(combined_similarities) if idx in valid_jobs]
         filtered_similarities.sort(key=lambda x: x[1], reverse=True)
         top_jobs = filtered_similarities[:n_recommendations]
 
@@ -175,15 +131,12 @@ class ContentBasedFilter:
 
     def _create_user_text_profile(self, user_profile):
         text_parts = []
-        if user_profile.get('skills'):
-            skills_text = ' '.join(user_profile['skills'])
-            text_parts.extend([skills_text]*3)
-        if user_profile.get('industry'):
-            text_parts.append(user_profile['industry'])
-        if user_profile.get('experience_level'):
-            text_parts.append(user_profile['experience_level'])
         if user_profile.get('location'):
             text_parts.append(user_profile['location'])
+        if user_profile.get('job_type'):
+            text_parts.append(user_profile['job_type'])
+        if user_profile.get('job_level'):
+            text_parts.append(user_profile['job_level'])
         return ' '.join(text_parts)
 
     def _create_user_feature_profile(self, user_profile):
@@ -193,26 +146,18 @@ class ContentBasedFilter:
         avg_salary = (min_salary + max_salary)/2
         features.extend([min_salary, max_salary, avg_salary])
 
-        exp_level = user_profile.get('experience_level', 'Unknown')
-        exp_mapping = {
-            'Entry level': 1,
-            'Associate': 2,
-            'Mid-Senior level': 3,
-            'Director': 4,
-            'Executive': 5,
-            'Unknown': 0
-        }
-        features.append(exp_mapping.get(exp_level, 0))
-
-        job_type = user_profile.get('job_type', 'Full-time')
-        emp_types = ['Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship']
+        # Job type one-hot
+        job_type = user_profile.get('job_type', 'Hybrid')
+        emp_types = ['Hybrid', 'Remote', 'Onsite']
         for et in emp_types:
             features.append(1 if job_type == et else 0)
 
-        skills_count = len(user_profile.get('skills', []))
-        features.append(skills_count)
+        # Job level
+        job_level = user_profile.get('job_level', 'Unknown')
+        level_mapping = {'Associate': 1, 'Mid senior': 2, 'Unknown': 0}
+        features.append(level_mapping.get(job_level, 0))
 
-        # Remote flexibility
+        # Remote flag
         features.append(0.5)
 
         return features
@@ -222,35 +167,25 @@ class ContentBasedFilter:
             return set()
         valid_jobs = set(range(len(self.data)))
 
-        if user_profile.get('location') and user_profile['location'] != 'Any':
-            location_mask = self.data['location'].str.contains(user_profile['location'], case=False, na=False)
+        # Filter by location
+        if user_profile.get('location'):
+            location_mask = self.data['job_location'].str.contains(user_profile['location'], case=False, na=False)
             valid_jobs &= set(self.data[location_mask].index)
 
-        if user_profile.get('min_salary'):
-            salary_mask = (self.data['salary_max'] >= user_profile['min_salary']) | self.data['salary_max'].isna()
-            valid_jobs &= set(self.data[salary_mask].index)
-
-        if user_profile.get('max_salary'):
-            salary_mask = (self.data['salary_min'] <= user_profile['max_salary']) | self.data['salary_min'].isna()
-            valid_jobs &= set(self.data[salary_mask].index)
-
-        if user_profile.get('job_type') and user_profile['job_type'] != 'Any':
-            job_type_mask = self.data['employment_type'] == user_profile['job_type']
+        # Filter by job type
+        if user_profile.get('job_type'):
+            job_type_mask = self.data['job_type'] == user_profile['job_type']
             valid_jobs &= set(self.data[job_type_mask].index)
 
-        if user_profile.get('experience_level'):
-            exp_level = user_profile['experience_level']
-            if exp_level == 'Entry level':
-                exp_mask = self.data['experience_level'].isin(['Entry level','Associate'])
-            elif exp_level == 'Associate':
-                exp_mask = self.data['experience_level'].isin(['Entry level','Associate','Mid-Senior level'])
-            elif exp_level == 'Mid-Senior level':
-                exp_mask = self.data['experience_level'].isin(['Associate','Mid-Senior level','Director'])
-            elif exp_level == 'Director':
-                exp_mask = self.data['experience_level'].isin(['Mid-Senior level','Director','Executive'])
-            else:
-                exp_mask = pd.Series([True]*len(self.data), index=self.data.index)
-            valid_jobs &= set(self.data[exp_mask].index)
+        # Filter by job level
+        if user_profile.get('job_level'):
+            level_mapping = {'Associate': 1, 'Mid senior': 2}
+            user_level_val = level_mapping.get(user_profile['job_level'], 0)
+            job_levels = self.data['job_level'].map(level_mapping).fillna(0)
+            valid_jobs &= set(self.data[job_levels == user_level_val].index)
+
+        if not valid_jobs:
+            valid_jobs = set(range(len(self.data)))  # fallback to all jobs
 
         return valid_jobs
 
