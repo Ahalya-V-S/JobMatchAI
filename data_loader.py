@@ -17,46 +17,26 @@ class DataLoader:
     def download_dataset(self):
         """Download the LinkedIn jobs dataset from Kaggle if not cached"""
         try:
-            # Check if merged CSV already exists
             merged_csv = os.path.join(self.cache_dir, "merged_dataset.csv")
             if os.path.exists(merged_csv):
                 st.info("Using cached merged CSV")
                 self.dataset_path = merged_csv
                 return merged_csv
 
-            # Download dataset from Kaggle
             st.info("Downloading dataset from Kaggle...")
             path = kagglehub.dataset_download("asaniczka/1-3m-linkedin-jobs-and-skills-2024")
 
-            # Find all CSVs in the downloaded folder
-            csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
+            # Find CSV files in the downloaded folder
+            csv_files = [os.path.join(path, f) for f in os.listdir(path) if f.endswith(".csv")]
             if not csv_files:
                 st.error("No CSV files found in downloaded dataset.")
                 return None
 
-            cached_paths = []
-            for csv_file in csv_files:
-                source_csv = os.path.join(path, csv_file)
-                cached_file_path = os.path.join(self.cache_dir, csv_file)
-
-                # Replace if already exists
-                if os.path.exists(cached_file_path):
-                    os.remove(cached_file_path)
-
-                shutil.copy(source_csv, cached_file_path)
-                cached_paths.append(cached_file_path)
-
-            st.success(f"Downloaded and cached: {', '.join(csv_files)}")
-
-            # Merge all CSVs into one
-            dfs = [pd.read_csv(f) for f in cached_paths]
-            merged_df = pd.concat(dfs, ignore_index=True)
+            # Merge all CSVs directly
+            merged_df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
             merged_df.to_csv(merged_csv, index=False)
 
             st.success(f"Merged dataset saved: {merged_csv}")
-            for f in cached_paths:
-                os.remove(f)
-
             self.dataset_path = merged_csv
             return merged_csv
 
@@ -66,7 +46,6 @@ class DataLoader:
             else:
                 st.error(f"Failed to download dataset: {str(e)}")
             return None
-
 
 
     def load_data(self):
