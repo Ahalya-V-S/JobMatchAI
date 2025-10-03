@@ -2,255 +2,136 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from sklearn.metrics.pairwise import cosine_similarity
-import warnings
-warnings.filterwarnings('ignore')
 
+# ------------------ Cached Evaluator ------------------
+@st.cache_data(show_spinner=False)
+def get_evaluator(data, n_test_users=5, sample_size=200):
+    return Evaluator(data, n_test_users=n_test_users, sample_size=sample_size)
 
 class Evaluator:
-    """Evaluation metrics for the updated HybridRecommender system."""
+    """Fast evaluator with cached recommendations and optional sampling."""
 
-    def __init__(self, data):
-        self.data = data
-        self.test_users = None
-        self.test_interactions = None
-        self._prepare_test_data()
+    def __init__(self, data, n_test_users=5, sample_size=200):
+        self.data = data.reset_index(drop=True)
+        self.n_test_users = n_test_users
+        self.data_sample = self.data.sample(min(sample_size, len(self.data)), random_state=42)
+        self.test_users = []
+        self.test_interactions = pd.DataFrame()
+        self._rec_cache = {}
+        self._prepare_test_users()
+        self._generate_ground_truth()
 
-    def _prepare_test_data(self):
-        """Generate synthetic test users based on dataset."""
+    # ----------------- Test Users -----------------
+    def _prepare_test_users(self):
         np.random.seed(42)
-        n_test_users = 50
-        test_users = []
-
+        all_keywords = self._extract_keywords()
         job_levels = self.data['job_level'].dropna().unique().tolist()
         job_types = self.data['job_type'].dropna().unique().tolist()
         locations = self.data['job_location'].dropna().unique().tolist()
 
-        for user_id in range(n_test_users):
-            user_profile = {
+        for user_id in range(self.n_test_users):
+            n_skills = np.random.randint(1, min(5, len(all_keywords))) if all_keywords else 0
+            self.test_users.append({
                 'user_id': user_id,
-                'preferred_job_level': np.random.choice(job_levels) if job_levels else 'Any',
-                'preferred_job_type': np.random.choice(job_types) if job_types else 'Any',
-                'job_location': np.random.choice(locations) if locations else 'Any',
-                'keywords': self._generate_random_keywords()
-            }
-            test_users.append(user_profile)
+                'job_level': np.random.choice(job_levels),
+                'job_type': np.random.choice(job_types),
+                'location': np.random.choice(locations),
+                'skills': list(np.random.choice(all_keywords, n_skills, replace=False)) if n_skills > 0 else []
+            })
 
-        self.test_users = test_users
-        self._generate_ground_truth()
-
-    def _generate_random_keywords(self):
-        """Generate random keywords from job_title and company columns"""
-        all_keywords = []
+    def _extract_keywords(self):
+        keywords = []
         for col in ['job_title', 'company']:
             if col in self.data.columns:
-                sample_size = min(50, len(self.data))
-                for val in self.data[col].dropna().sample(sample_size):
-                    all_keywords.extend(val.lower().split())
-        unique_keywords = list(set(all_keywords))
-        n_keywords = np.random.randint(1, min(5, len(unique_keywords))) if unique_keywords else 0
-        return np.random.choice(unique_keywords, size=n_keywords, replace=False).tolist() if n_keywords > 0 else []
+                keywords.extend(self.data[col].dropna().str.lower().str.split().explode().tolist())
+        return list(set(keywords))
 
+    # ----------------- Ground Truth -----------------
     def _generate_ground_truth(self):
-        """Generate ground truth interactions for test users"""
-        ground_truth = []
+        records = []
         for user in self.test_users:
             relevant_jobs = self._find_relevant_jobs(user)
-            for job_idx in relevant_jobs:
-                ground_truth.append({'user_id': user['user_id'], 'job_idx': job_idx, 'relevant': 1})
-        self.test_interactions = pd.DataFrame(ground_truth)
+            for idx in relevant_jobs:
+                records.append({'user_id': user['user_id'], 'job_idx': idx, 'relevant': 1})
+        self.test_interactions = pd.DataFrame(records)
 
-    def _find_relevant_jobs(self, user_profile):
-        """Find relevant jobs based on level, type, location, and keywords"""
-        relevant_jobs = []
-
-        for idx in range(len(self.data)):
-            job = self.data.iloc[idx]
+    def _find_relevant_jobs(self, user):
+        relevant = []
+        for idx, job in self.data_sample.iterrows():
             score = 0
-
-            # Job level match
-            if job.get('job_level') == user_profile['preferred_job_level']:
-                score += 3
-
-            # Job type match
-            if job.get('job_type') == user_profile['preferred_job_type']:
-                score += 2
-
-            # Location match
-            if user_profile['job_location'] != 'Any' and pd.notna(job.get('job_location')):
-                if user_profile['job_location'].lower() in job.get('job_location', '').lower():
+            if job.get('job_level') == user.get('job_level'): score += 2
+            if job.get('job_type') == user.get('job_type'): score += 2
+            if user.get('location') and pd.notna(job.get('job_location')):
+                if user['location'].lower() in job.get('job_location','').lower():
                     score += 1
+            if user.get('skills'):
+                job_text = f"{job.get('job_title','')} {job.get('company','')}".lower()
+                score += sum(1 for kw in user['skills'] if kw.lower() in job_text)
+            if score >= 1:  # ensure at least one match
+                relevant.append(idx)
+        return relevant[:20]
 
-            # Keyword match
-            job_text = f"{job.get('job_title', '')} {job.get('company', '')}".lower()
-            keyword_matches = sum(1 for kw in user_profile['keywords'] if kw in job_text)
-            score += keyword_matches
+    # ----------------- Cached Recommendations -----------------
+    def _get_recs(self, recommender, user, k=10):
+        uid = user['user_id']
+        if uid in self._rec_cache:
+            return self._rec_cache[uid]
+        recs = recommender.recommend(user, n_recommendations=k)
+        self._rec_cache[uid] = recs
+        return recs
 
-            if score >= 3:
-                relevant_jobs.append(idx)
-
-        return relevant_jobs[:20]
-
-    # ----------------- Evaluation Metrics -----------------
-
+    # ----------------- Metrics -----------------
     def evaluate_precision_recall(self, recommender, k=10):
-        precisions = []
-        recalls = []
-
+        precisions, recalls = [], []
         for user in self.test_users:
-            user_id = user['user_id']
-            user_truth = self.test_interactions[self.test_interactions['user_id'] == user_id]['job_idx'].tolist()
-
+            user_truth = self.test_interactions[self.test_interactions['user_id']==user['user_id']]['job_idx'].tolist()
             if not user_truth:
                 continue
-
-            try:
-                recommendations = recommender.recommend(user, n_recommendations=k)
-                if recommendations is None or recommendations.empty:
-                    precisions.append(0)
-                    recalls.append(0)
-                    continue
-
-                recommended_jobs = recommendations['job_idx'].tolist()
-                relevant_recommended = set(recommended_jobs) & set(user_truth)
-
-                precision = len(relevant_recommended) / len(recommended_jobs) if recommended_jobs else 0
-                recall = len(relevant_recommended) / len(user_truth) if user_truth else 0
-
-                precisions.append(precision)
-                recalls.append(recall)
-
-            except Exception as e:
-                st.warning(f"Error evaluating user {user_id}: {str(e)}")
+            recs = self._get_recs(recommender, user, k)
+            if recs is None or recs.empty:
                 precisions.append(0)
                 recalls.append(0)
-
-        avg_precision = np.mean(precisions) if precisions else 0
-        avg_recall = np.mean(recalls) if recalls else 0
-        return avg_precision, avg_recall
+                continue
+            recommended_jobs = recs['job_idx'].tolist()
+            relevant_recommended = set(recommended_jobs) & set(user_truth)
+            precisions.append(len(relevant_recommended)/len(recommended_jobs) if recommended_jobs else 0)
+            recalls.append(len(relevant_recommended)/len(user_truth) if user_truth else 0)
+        return np.mean(precisions) if precisions else 0, np.mean(recalls) if recalls else 0
 
     def evaluate_diversity(self, recommender, k=10):
-        all_recommendations = []
-        for user in self.test_users[:20]:
-            try:
-                recommendations = recommender.recommend(user, n_recommendations=k)
-                if recommendations is not None and len(recommendations) > 0:
-                    all_recommendations.extend(recommendations['job_idx'].tolist())
-            except Exception:
-                continue
-
-        if not all_recommendations:
-            return 0
-
-        return len(set(all_recommendations)) / len(all_recommendations)
+        all_recs = []
+        for user in self.test_users:
+            recs = self._get_recs(recommender, user, k)
+            if recs is not None:
+                all_recs.extend(recs['job_idx'].tolist())
+        return len(set(all_recs))/len(all_recs) if all_recs else 0
 
     def evaluate_coverage(self, recommender, k=10):
-        recommended_items = set()
-        for user in self.test_users[:20]:
-            try:
-                recommendations = recommender.recommend(user, n_recommendations=k)
-                if recommendations is not None and len(recommendations) > 0:
-                    recommended_items.update(recommendations['job_idx'].tolist())
-            except Exception:
-                continue
+        items = set()
+        for user in self.test_users:
+            recs = self._get_recs(recommender, user, k)
+            if recs is not None:
+                items.update(recs['job_idx'].tolist())
+        return len(items)/len(self.data) if len(self.data) > 0 else 0
 
-        total_items = len(self.data)
-        return len(recommended_items) / total_items if total_items > 0 else 0
+    # ----------------- Evaluate all systems -----------------
+    def evaluate_all_systems(self, cb_filter, cf_filter, kb_filter, hybrid, k=10):
+        results = {}
+        systems = {'Content-Based': cb_filter, 'Collaborative': cf_filter,
+                   'Knowledge-Based': kb_filter, 'Hybrid': hybrid}
+        for name, rec in systems.items():
+            precision, recall = self.evaluate_precision_recall(rec, k)
+            f1 = 2*precision*recall/(precision+recall) if (precision+recall) > 0 else 0
+            diversity = self.evaluate_diversity(rec, k)
+            coverage = self.evaluate_coverage(rec, k)
+            results[name] = {'precision': precision, 'recall': recall, 'f1_score': f1,
+                             'diversity': diversity, 'coverage': coverage}
+        return results
 
-    def evaluate_novelty(self, recommender, k=10):
-        item_popularity = {}
-        if hasattr(self, 'test_interactions') and self.test_interactions is not None:
-            popularity_counts = self.test_interactions['job_idx'].value_counts()
-            total_interactions = len(self.test_interactions)
-            for job_idx in range(len(self.data)):
-                item_popularity[job_idx] = popularity_counts.get(job_idx, 0) / total_interactions
-        else:
-            for job_idx in range(len(self.data)):
-                item_popularity[job_idx] = 1.0 / len(self.data)
-
-        novelty_scores = []
-        for user in self.test_users[:20]:
-            try:
-                recommendations = recommender.recommend(user, n_recommendations=k)
-                if recommendations is not None and len(recommendations) > 0:
-                    user_novelty = 0
-                    for job_idx in recommendations['job_idx']:
-                        popularity = item_popularity.get(job_idx, 1.0 / len(self.data))
-                        user_novelty += -np.log2(popularity) if popularity > 0 else 0
-                    novelty_scores.append(user_novelty / len(recommendations))
-            except Exception:
-                continue
-
-        return np.mean(novelty_scores) if novelty_scores else 0
-
-    def evaluate_serendipity(self, recommender, k=10):
-        serendipity_scores = []
-        for user in self.test_users[:10]:
-            try:
-                recommendations = recommender.recommend(user, n_recommendations=k)
-                if recommendations is None or len(recommendations) == 0:
-                    continue
-
-                user_vector = self._create_user_profile_vector(user)
-                serendipity_score = 0
-
-                for job_idx in recommendations['job_idx']:
-                    job = self.data.iloc[job_idx]
-                    job_vector = self._create_job_vector(job)
-
-                    similarity = cosine_similarity([user_vector], [job_vector])[0][0]
-                    unexpectedness = 1 - similarity
-                    relevance = self._calculate_simple_relevance(job, user)
-                    serendipity_score += unexpectedness * relevance
-
-                serendipity_scores.append(serendipity_score / len(recommendations))
-
-            except Exception:
-                continue
-
-        return np.mean(serendipity_scores) if serendipity_scores else 0
-
-    # ----------------- Helper functions -----------------
-
-    def _create_user_profile_vector(self, user):
-        vector = []
-
-        level_mapping = {lvl: i+1 for i, lvl in enumerate(self.data['job_level'].dropna().unique())}
-        vector.append(level_mapping.get(user.get('preferred_job_level'), 0))
-
-        type_mapping = {t: i+1 for i, t in enumerate(self.data['job_type'].dropna().unique())}
-        vector.append(type_mapping.get(user.get('preferred_job_type'), 0))
-
-        vector.append(hash(user.get('job_location', 'Any')) % 100 / 100)
-        vector.append(len(user.get('keywords', [])))
-        return vector
-
-    def _create_job_vector(self, job):
-        vector = []
-
-        level_mapping = {lvl: i+1 for i, lvl in enumerate(self.data['job_level'].dropna().unique())}
-        vector.append(level_mapping.get(job.get('job_level'), 0))
-
-        type_mapping = {t: i+1 for i, t in enumerate(self.data['job_type'].dropna().unique())}
-        vector.append(type_mapping.get(job.get('job_type'), 0))
-
-        vector.append(hash(job.get('job_location', 'Any')) % 100 / 100)
-
-        keyword_count = len(str(job.get('job_title', '')).split()) + len(str(job.get('company', '')).split())
-        vector.append(keyword_count)
-        return vector
-
-    def _calculate_simple_relevance(self, job, user):
-        relevance = 0
-        if job.get('job_level') == user.get('preferred_job_level'):
-            relevance += 0.4
-        if job.get('job_type') == user.get('preferred_job_type'):
-            relevance += 0.3
-        if user.get('job_location', 'Any') != 'Any' and pd.notna(job.get('job_location')):
-            if user.get('job_location').lower() in job.get('job_location', '').lower():
-                relevance += 0.2
-
-        job_text = f"{job.get('job_title', '')} {job.get('company', '')}".lower()
-        keyword_matches = sum(1 for kw in user.get('keywords', []) if kw in job_text)
-        relevance += min(0.1, 0.05 * keyword_matches)
-
-        return min(1.0, relevance)
+# ------------------ Streamlit Integration ------------------
+def run_evaluation(data, cb_filter, cf_filter, kb_filter, hybrid):
+    with st.spinner("Evaluating recommendation systems... ⏳"):
+        evaluator = get_evaluator(data)
+        results = evaluator.evaluate_all_systems(cb_filter, cf_filter, kb_filter, hybrid, k=10)
+    st.success("✅ Evaluation Complete!")
+    st.dataframe(pd.DataFrame(results).T)

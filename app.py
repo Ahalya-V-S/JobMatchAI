@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from collections import Counter
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -172,92 +173,56 @@ def show_home_page(data):
         """)
 
 def show_analytics_page(data):
-    st.markdown('<div class="section-header">📊 Data Analytics Dashboard</div>', unsafe_allow_html=True)
-    
-    analytics = Analytics(data)
-    
-    # # Job distribution by experience level
-    # st.markdown("#### Job Distribution by Experience Level")
-    # exp_dist = analytics.get_experience_distribution()
-    # fig_exp = px.pie(values=exp_dist.values, names=exp_dist.index, 
-    #                  title="Jobs by Experience Level", color_discrete_sequence=px.colors.qualitative.Set3)
-    # st.plotly_chart(fig_exp, use_container_width=True)
-    
-    # Top companies and locations
-    col1, col2 = st.columns(2)
+    st.markdown('<div class="section-header">📊 Job Analytics Dashboard</div>', unsafe_allow_html=True)
 
+    analytics = Analytics(data)
+
+    # --- Top Companies & Locations ---
+    col1, col2 = st.columns(2)
     with col1:
-        st.markdown("#### Top 15 Companies by Job Postings")
-        top_companies = analytics.get_top_companies(15)
-        
-        # Convert Series to DataFrame
-        df_companies = top_companies.reset_index()
-        df_companies.columns = ['company', 'count']
-        
-        fig_companies = px.bar(
-            df_companies,
-            x='count',
-            y='company',
-            orientation='h',
-            title="Top Companies"
-        )
-        fig_companies.update_layout(yaxis={'categoryorder': 'total ascending'})
-        st.plotly_chart(fig_companies, use_container_width=True)
+        fig_companies = analytics.create_top_companies_plot(15)
+        if fig_companies:
+            st.plotly_chart(fig_companies, use_container_width=True)
 
     with col2:
-        st.markdown("#### Top 15 Job Locations")
-        top_locations = analytics.get_top_locations(15)
-        
-        # Convert Series to DataFrame
-        df_locations = top_locations.reset_index()
-        df_locations.columns = ['location', 'count']
-        
-        fig_locations = px.bar(
-            df_locations,
-            x='count',
-            y='location',
-            orientation='h',
-            title="Top Locations"
-        )
-        fig_locations.update_layout(yaxis={'categoryorder': 'total ascending'})
-        st.plotly_chart(fig_locations, use_container_width=True)
+        fig_locations = analytics.create_top_locations_plot(15)
+        if fig_locations:
+            st.plotly_chart(fig_locations, use_container_width=True)
 
-    
-    # # Salary analysis
-    # st.markdown("#### Salary Distribution Analysis")
-    # salary_stats = analytics.get_salary_statistics()
-    
-    # col1, col2, col3, col4 = st.columns(4)
-    # with col1:
-    #     st.metric("Average Salary", f"${salary_stats['mean']:,.0f}")
-    # with col2:
-    #     st.metric("Median Salary", f"${salary_stats['median']:,.0f}")
-    # with col3:
-    #     st.metric("Min Salary", f"${salary_stats['min']:,.0f}")
-    # with col4:
-    #     st.metric("Max Salary", f"${salary_stats['max']:,.0f}")
-    
-    # # Salary distribution plot
-    # salary_data = data.dropna(subset=['salary_min', 'salary_max'])
-    # if not salary_data.empty:
-    #     fig_salary = px.histogram(salary_data, x='salary_min', nbins=50, 
-    #                             title="Salary Distribution (Minimum Salary)")
-    #     st.plotly_chart(fig_salary, use_container_width=True)
-    
-    # # Skills analysis
-    # st.markdown("#### Most In-Demand Skills")
-    # top_skills = analytics.get_top_skills(20)
-    # if not top_skills.empty:
-    #     fig_skills = px.bar(x=top_skills.values, y=top_skills.index, 
-    #                        orientation='h', title="Top 20 Skills in Job Market")
-    #     fig_skills.update_layout(yaxis={'categoryorder': 'total ascending'})
+    # --- Job Level & Job Type Distribution ---
+    col1, col2 = st.columns(2)
+    with col1:
+        fig_level = analytics.create_experience_level_plot()
+        if fig_level:
+            st.plotly_chart(fig_level, use_container_width=True)
+
+    with col2:
+        fig_type = analytics.create_job_type_plot()
+        if fig_type:
+            st.plotly_chart(fig_type, use_container_width=True)
+
+    # # --- Top Skills ---
+    # st.markdown("#### Top 20 Skills in Job Market")
+    # fig_skills = analytics.create_top_skills_plot(20)
+    # if fig_skills:
     #     st.plotly_chart(fig_skills, use_container_width=True)
+
+    # # --- Job Posting Trends ---
+    # st.markdown("#### Job Posting Trends Over Time")
+    # fig_trends = analytics.create_job_posting_trends_plot()
+    # if fig_trends:
+    #     st.plotly_chart(fig_trends, use_container_width=True)
+
+    # # --- Remote Jobs ---
+    # st.markdown("#### Remote Job Statistics")
+    # remote_stats = analytics.get_remote_job_statistics()
+    # st.write(remote_stats)
 
 
 def show_recommendations_page(data, hybrid):
     st.markdown('<div class="section-header">🎯 Get Personalized Job Recommendations</div>', unsafe_allow_html=True)
     
-    # User input form
+    # --- User Input Form ---
     st.markdown("#### Tell us about yourself and your preferences:")
 
     col1, col2 = st.columns(2)
@@ -277,6 +242,12 @@ def show_recommendations_page(data, hybrid):
         job_level = st.selectbox(
             "Job Level Preference",
             ["Any"] + sorted(data['job_level'].dropna().unique().tolist())
+        )
+
+        # Skills input
+        user_skills = st.text_input(
+            "Your Skills (comma-separated)",
+            placeholder="Python, SQL, Machine Learning"
         )
 
     st.markdown("#### Customize Recommendation Approach")
@@ -300,15 +271,16 @@ def show_recommendations_page(data, hybrid):
 
             # Build user profile
             user_profile = {
-                'location': preferred_location if preferred_location != "Any" else None,
+                'job_location': preferred_location if preferred_location != "Any" else None,
                 'job_type': job_type if job_type != "Any" else None,
-                'job_level': job_level if job_level != "Any" else None
+                'job_level': job_level if job_level != "Any" else None,
+                'skills': [s.strip().title() for s in user_skills.split(',')] if user_skills else None
             }
 
-            # Filter dataset for required columns
+            # Filter dataset to required columns
             data_filtered = data.dropna(subset=['job_location', 'job_type', 'job_level']).reset_index(drop=True)
 
-            # Get recommendations
+            # Get recommendations from hybrid recommender
             recommendations = hybrid.recommend(
                 user_profile,
                 n_recommendations=10,
@@ -319,10 +291,11 @@ def show_recommendations_page(data, hybrid):
                 st.success(f"Found {len(recommendations)} job recommendations for you!")
 
                 for idx, row in recommendations.iterrows():
-                    job_idx = row.name  # index in filtered dataset
+                    # Use the actual 'job_idx' column and cast to int for iloc
+                    job_idx = int(row['job_idx'])
                     job = data_filtered.iloc[job_idx]
 
-                    score_value = float(row['score']) if 'score' in row else float(row.iloc[0])
+                    score_value = float(row.get('hybrid_score', 0))
 
                     with st.expander(f"🎯 {idx+1}. {job['job_title']} at {job['company']} (Match: {score_value:.1%})"):
                         col1, col2 = st.columns([2, 1])
@@ -330,6 +303,8 @@ def show_recommendations_page(data, hybrid):
                             st.markdown(f"**📍 Location:** {job['job_location']}")
                             st.markdown(f"**📊 Level:** {job['job_level']}")
                             st.markdown(f"**💼 Type:** {job['job_type']}")
+                            if 'job_skills' in job and pd.notna(job['job_skills']):
+                                st.markdown(f"**🛠 Skills Required:** {job['job_skills']}")
                         with col2:
                             if pd.notna(job.get('job_link')):
                                 st.markdown(f"**🔗 Apply:** [View Job]({job['job_link']})")
@@ -337,13 +312,15 @@ def show_recommendations_page(data, hybrid):
                 st.warning("No jobs found matching your criteria. Try adjusting your preferences.")
 
 
+
 def show_evaluation_page(data, cb_filter, cf_filter, kb_filter, hybrid):
     st.markdown('<div class="section-header">📈 System Evaluation Dashboard</div>', unsafe_allow_html=True)
     
-    evaluator = Evaluator(data)
+    
     
     # Generate evaluation metrics
     with st.spinner("Evaluating recommendation systems..."):
+        evaluator = Evaluator(data)
         evaluation_results = evaluator.evaluate_all_systems(cb_filter, cf_filter, kb_filter, hybrid)
     
     # Display evaluation metrics
@@ -419,54 +396,58 @@ def show_evaluation_page(data, cb_filter, cf_filter, kb_filter, hybrid):
         st.markdown("- More complex to tune")
         st.markdown("- Higher computational cost")
 
-def show_dataset_overview(data):
-    st.markdown('<div class="section-header">📋 Dataset Overview</div>', unsafe_allow_html=True)
-    
-    # Dataset basic info
-    st.markdown("#### Dataset Information")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Records", f"{len(data):,}")
-    with col2:
-        st.metric("Features", f"{len(data.columns)}")
-    with col3:
-        st.metric("Memory Usage", f"{data.memory_usage(deep=True).sum() / 1024**2:.1f} MB")
-    with col4:
-        st.metric("Missing Values", f"{data.isnull().sum().sum():,}")
-    
-    # Column information
-    st.markdown("#### Column Information")
-    col_info = []
-    for col in data.columns:
-        col_info.append({
-            'Column': col,
-            'Data Type': str(data[col].dtype),
-            'Non-Null Count': data[col].count(),
-            'Null Count': data[col].isnull().sum(),
-            'Unique Values': data[col].nunique(),
-            'Sample Values': str(data[col].dropna().iloc[0])[:50] + "..." if len(str(data[col].dropna().iloc[0])) > 50 else str(data[col].dropna().iloc[0]) if not data[col].dropna().empty else "N/A"
-        })
-    
-    col_df = pd.DataFrame(col_info)
-    st.dataframe(col_df, use_container_width=True)
-    
-    # Missing values heatmap
-    st.markdown("#### Missing Values Analysis")
-    missing_data = data.isnull().sum()
-    missing_data = missing_data[missing_data > 0].sort_values(ascending=False)
-    
-    if not missing_data.empty:
-        fig_missing = px.bar(x=missing_data.values, y=missing_data.index, 
-                           orientation='h', title="Missing Values by Column")
-        fig_missing.update_layout(yaxis={'categoryorder': 'total ascending'})
-        st.plotly_chart(fig_missing, use_container_width=True)
-    else:
-        st.success("No missing values found in the dataset!")
-    
-    # Sample data
-    st.markdown("#### Sample Data (First 10 rows)")
-    st.dataframe(data.head(10), use_container_width=True)
+
+def show_dataset_overview(data, sample_size=10):
+    with st.spinner("Loading dataset overview..."):
+        st.markdown('<div class="section-header">📋 Dataset Overview</div>', unsafe_allow_html=True)
+        
+        # ---------------- Basic info ----------------
+        st.markdown("#### Dataset Information")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1: st.metric("Total Records", f"{len(data):,}")
+        with col2: st.metric("Features", f"{len(data.columns)}")
+        with col3: st.metric("Memory Usage", f"{data.memory_usage(deep=False).sum() / 1024**2:.1f} MB")
+        with col4: st.metric("Missing Values", f"{data.isnull().sum().sum():,}")
+        
+        # ---------------- Column info ----------------
+        st.markdown("#### Column Information")
+        col_info = []
+        for col in data.columns:
+            sample = data[col].iloc[0] if not data[col].empty else np.nan
+            # Handle unhashable / mixed-type columns safely
+            try:
+                unique_vals = data[col].nunique(dropna=True)
+            except Exception:
+                unique_vals = np.nan
+            col_info.append({
+                'Column': col,
+                'Data Type': str(data[col].dtype),
+                'Non-Null Count': data[col].count(),
+                'Null Count': data[col].isnull().sum(),
+                'Unique Values': unique_vals,
+                'Sample Value': str(sample)[:50] + ("..." if len(str(sample)) > 50 else "")
+            })
+        st.dataframe(pd.DataFrame(col_info), width='stretch')
+        
+        # ---------------- Missing values plot ----------------
+        missing_data = data.isnull().sum()
+        missing_data = missing_data[missing_data > 0]
+        if not missing_data.empty:
+            fig = px.bar(
+                x=missing_data.values, 
+                y=missing_data.index, 
+                orientation='h',
+                title="Missing Values by Column"
+            )
+            # Only update layout, no deprecated keyword args
+            fig.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig)  # no extra config
+        else:
+            st.success("No missing values found!")
+        
+        # ---------------- Sample rows ----------------
+        st.markdown(f"#### Sample Data (First {sample_size} rows)")
+        st.dataframe(data.head(sample_size), width='stretch')
 
 if __name__ == "__main__":
     main()

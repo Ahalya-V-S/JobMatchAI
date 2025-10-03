@@ -7,7 +7,8 @@ import shutil
 class DataLoader:
     """Handles downloading, caching, and loading LinkedIn jobs datasets from Kaggle"""
 
-    def __init__(self, cache_dir="data_cache/2/2"):
+
+    def __init__(self, cache_dir="data_cache"):
         self.cache_dir = cache_dir
         self.dataset_path = None
         self.data = None
@@ -16,26 +17,48 @@ class DataLoader:
     def download_dataset(self):
         """Download the LinkedIn jobs dataset from Kaggle if not cached"""
         try:
-            # Check if any CSV exists in cache
-            cached_files = [f for f in os.listdir(self.cache_dir) if f.endswith(".csv")]
-            if cached_files:
-                st.info(f"Using cached CSV: {cached_files[0]}")
-                self.dataset_path = os.path.join(self.cache_dir, cached_files[0])
-                return self.dataset_path
+            # Check if merged CSV already exists
+            merged_csv = os.path.join(self.cache_dir, "merged_dataset.csv")
+            if os.path.exists(merged_csv):
+                st.info("Using cached merged CSV")
+                self.dataset_path = merged_csv
+                return merged_csv
 
             # Download dataset from Kaggle
             st.info("Downloading dataset from Kaggle...")
             path = kagglehub.dataset_download("asaniczka/1-3m-linkedin-jobs-and-skills-2024")
 
-            # Save to cache
-            cached_file_path = os.path.join(self.cache_dir, os.path.basename(path))
-            if os.path.exists(cached_file_path):
-                os.remove(cached_file_path)
-            shutil.move(path, cached_file_path)
-            st.success(f"Dataset saved to cache: {cached_file_path}")
+            # Find all CSVs in the downloaded folder
+            csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
+            if not csv_files:
+                st.error("No CSV files found in downloaded dataset.")
+                return None
 
-            self.dataset_path = cached_file_path
-            return cached_file_path
+            cached_paths = []
+            for csv_file in csv_files:
+                source_csv = os.path.join(path, csv_file)
+                cached_file_path = os.path.join(self.cache_dir, csv_file)
+
+                # Replace if already exists
+                if os.path.exists(cached_file_path):
+                    os.remove(cached_file_path)
+
+                shutil.copy(source_csv, cached_file_path)
+                cached_paths.append(cached_file_path)
+
+            st.success(f"Downloaded and cached: {', '.join(csv_files)}")
+
+            # Merge all CSVs into one
+            dfs = [pd.read_csv(f) for f in cached_paths]
+            merged_df = pd.concat(dfs, ignore_index=True)
+            merged_df.to_csv(merged_csv, index=False)
+
+            st.success(f"Merged dataset saved: {merged_csv}")
+            for f in cached_paths:
+                os.remove(f)
+
+            self.dataset_path = merged_csv
+            return merged_csv
 
         except Exception as e:
             if "404" in str(e):
@@ -43,6 +66,8 @@ class DataLoader:
             else:
                 st.error(f"Failed to download dataset: {str(e)}")
             return None
+
+
 
     def load_data(self):
         """Load the LinkedIn jobs dataset"""
@@ -56,7 +81,7 @@ class DataLoader:
 
             # Load CSV
             try:
-                self.data = pd.read_csv(self.dataset_path, nrows=50000, low_memory=False)
+                self.data = pd.read_csv(self.dataset_path, nrows=250000, low_memory=False)
                 st.success(f"Loaded dataset with {len(self.data):,} rows")
                 st.info(f"Dataset shape: {self.data.shape}")
                 st.info(f"Columns: {', '.join(self.data.columns.tolist())}")

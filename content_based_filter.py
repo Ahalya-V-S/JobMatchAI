@@ -31,7 +31,7 @@ class ContentBasedFilter:
         st.success("Content-Based Filter training completed!")
 
     def _create_tfidf_features(self):
-        """Create TF-IDF features from job description and location"""
+        """Create TF-IDF features from job_title, job_summary, job_location, job_type, job_level, job_skills"""
         if self.data is None:
             st.error("No data available for TF-IDF feature creation")
             return
@@ -42,16 +42,18 @@ class ContentBasedFilter:
             job = self.data.loc[idx]
             text_parts = []
 
-            if pd.notna(job.get('title')):
-                text_parts.append(str(job['title']))
-            if pd.notna(job.get('description')):
-                text_parts.append(str(job['description']))
+            if pd.notna(job.get('job_title')):
+                text_parts.append(str(job['job_title']))
+            if pd.notna(job.get('job_summary')):
+                text_parts.append(str(job['job_summary']))
             if pd.notna(job.get('job_location')):
                 text_parts.append(str(job['job_location']))
             if pd.notna(job.get('job_type')):
                 text_parts.append(str(job['job_type']))
             if pd.notna(job.get('job_level')):
                 text_parts.append(str(job['job_level']))
+            if pd.notna(job.get('job_skills')):
+                text_parts.append(str(job['job_skills']))
 
             combined_text = ' '.join(text_parts)
             text_features.append(combined_text if combined_text.strip() else " ")
@@ -67,7 +69,7 @@ class ContentBasedFilter:
         st.info(f"Created TF-IDF matrix with shape: {self.tfidf_matrix.shape}")
 
     def _create_feature_matrix(self):
-        """Create numerical feature matrix for additional similarity"""
+        """Create numerical/categorical feature matrix"""
         if self.data is None:
             st.error("No data available for feature matrix creation")
             return
@@ -78,7 +80,7 @@ class ContentBasedFilter:
             job = self.data.loc[idx]
             job_features = []
 
-            # Salary
+            # Placeholder for salary (set 0 if not available)
             salary_min = job.get('salary_min', 0) if pd.notna(job.get('salary_min')) else 0
             salary_max = job.get('salary_max', 0) if pd.notna(job.get('salary_max')) else 0
             salary_avg = (salary_min + salary_max)/2 if salary_max > 0 else 0
@@ -98,6 +100,10 @@ class ContentBasedFilter:
             # Remote flag
             is_remote = 1 if job.get('is_remote', False) else 0
             job_features.append(is_remote)
+
+            # Number of skills
+            skills_count = len(str(job.get('job_skills', '')).split(',')) if pd.notna(job.get('job_skills')) else 0
+            job_features.append(skills_count)
 
             features.append(job_features)
 
@@ -131,12 +137,18 @@ class ContentBasedFilter:
 
     def _create_user_text_profile(self, user_profile):
         text_parts = []
+        if user_profile.get('job_title'):
+            text_parts.append(user_profile['job_title'])
+        if user_profile.get('job_summary'):
+            text_parts.append(user_profile['job_summary'])
         if user_profile.get('location'):
             text_parts.append(user_profile['location'])
         if user_profile.get('job_type'):
             text_parts.append(user_profile['job_type'])
         if user_profile.get('job_level'):
             text_parts.append(user_profile['job_level'])
+        if user_profile.get('skills'):
+            text_parts.append(' '.join(user_profile['skills']))
         return ' '.join(text_parts)
 
     def _create_user_feature_profile(self, user_profile):
@@ -159,6 +171,10 @@ class ContentBasedFilter:
 
         # Remote flag
         features.append(0.5)
+
+        # Number of skills
+        skills_count = len(user_profile.get('skills', []))
+        features.append(skills_count)
 
         return features
 

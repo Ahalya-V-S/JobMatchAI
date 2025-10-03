@@ -38,8 +38,8 @@ class CollaborativeFilter:
         n_users = min(200, len(data)//10)
         interactions = []
 
-        user_levels = data['job_level'].unique().tolist() if 'job_level' in data.columns else ['Any']
-        user_types = data['job_type'].unique().tolist() if 'job_type' in data.columns else ['Any']
+        user_levels = data['job_level'].dropna().unique().tolist()
+        user_types = data['job_type'].dropna().unique().tolist()
 
         for user_id in range(n_users):
             level_pref = np.random.choice(user_levels)
@@ -47,10 +47,8 @@ class CollaborativeFilter:
             n_interactions = np.random.randint(5, 15)
 
             scores = np.ones(len(data))
-            if 'job_level' in data.columns:
-                scores += (data['job_level'] == level_pref).astype(float) * 2
-            if 'job_type' in data.columns:
-                scores += (data['job_type'] == type_pref).astype(float) * 1.5
+            scores += (data['job_level'] == level_pref).astype(float) * 2
+            scores += (data['job_type'] == type_pref).astype(float) * 1.5
 
             job_indices = np.random.choice(len(data), size=n_interactions, replace=False, p=scores/scores.sum())
             for job_idx in job_indices:
@@ -89,12 +87,15 @@ class CollaborativeFilter:
 
         # Step 1: Assign higher scores to jobs matching the user's profile
         job_scores = np.ones(self.user_item_matrix.shape[1])
-        if 'job_level' in self.data.columns and user_profile.get('job_level'):
+        if user_profile.get('job_level'):
             job_scores += (self.data['job_level'] == user_profile['job_level']).astype(float) * 2
-        if 'job_type' in self.data.columns and user_profile.get('job_type'):
+        if user_profile.get('job_type'):
             job_scores += (self.data['job_type'] == user_profile['job_type']).astype(float) * 1.5
-        if 'location' in self.data.columns and user_profile.get('location'):
+        if user_profile.get('location'):
             job_scores += self.data['job_location'].str.contains(user_profile['location'], case=False, na=False).astype(float) * 2
+        if user_profile.get('skills'):
+            skills_count = self.data['job_skills'].fillna('').apply(lambda x: len(set(x.split(',')) & set(user_profile['skills'])))
+            job_scores += skills_count.astype(float)
 
         # Step 2: Create synthetic user vector in latent space
         synthetic_user = np.dot(job_scores, self.item_factors) / np.sum(job_scores)
