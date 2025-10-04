@@ -2,84 +2,111 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from datetime import datetime, timedelta, timezone
-
+import difflib
 
 class KnowledgeBasedFilter:
-    """Enhanced Knowledge-based filtering with extra rules"""
+    """Robust Knowledge-Based Filtering for job recommendations"""
 
     def __init__(self):
         self.data = None
+        self.state_abbrev = {
+            'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
+            'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
+            'HI': 'Hawaii', 'ID': 'Idaho', 'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa',
+            'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+            'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi', 'MO': 'Missouri',
+            'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada', 'NH': 'New Hampshire', 'NJ': 'New Jersey',
+            'NM': 'New Mexico', 'NY': 'New York', 'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio',
+            'OK': 'Oklahoma', 'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+            'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah', 'VT': 'Vermont',
+            'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming'
+        }
 
-    def fit(self, data):
+    def fit(self, data: pd.DataFrame):
+        """Initialize the filter and prepare dates"""
         st.info("Initializing Knowledge-Based Filter...")
         self.data = data.copy()
-        # Convert dates to datetime
         for col in ['first_seen', 'last_processed_time']:
             if col in self.data.columns:
-                self.data[col] = pd.to_datetime(self.data[col], errors='coerce')
-        st.success("Knowledge-Based Filter initialization completed!")
+                self.data[col] = pd.to_datetime(self.data[col], errors='coerce', utc=True)
+        st.success("Knowledge-Based Filter ready!")
 
+    def _normalize_skills(self, skills):
+        if pd.isna(skills):
+            return []
+        if isinstance(skills, list):
+            return [s.strip().lower() for s in skills if s.strip()]
+        return [s.strip().lower() for s in str(skills).split(',') if s.strip()]
 
-    def recommend(self, user_profile, n_recommendations=10):
-        if self.data is None:
-            return None
+    def _normalize_location(self, loc):
+        if pd.isna(loc):
+            return ''
+        loc = str(loc).strip().upper()
+        if loc in self.state_abbrev:
+            return self.state_abbrev[loc].lower()
+        return loc.lower()
 
-        filtered = self.data.copy()
+    def _location_match(self, user_loc, job_loc):
+        user_loc_norm = self._normalize_location(user_loc)
+        job_loc_norm = self._normalize_location(job_loc)
+        return difflib.SequenceMatcher(None, user_loc_norm, job_loc_norm).ratio()
 
-        # --- Job level ---
-        if user_profile.get('job_level') and user_profile['job_level'] != 'Any':
-            filtered['level_match'] = (filtered['job_level'] == user_profile['job_level']).astype(float)
-        else:
-            filtered['level_match'] = 0.5
+    def recommend(self, user_profile: dict, n_recommendations: int = 10):
+        if self.data is None or self.data.empty:
+            st.warning("No data available for Knowledge-Based Filter")
+            return pd.DataFrame(columns=['job_idx', 'kb_score'])
 
-        # --- Job type ---
-        if user_profile.get('job_type') and user_profile['job_type'] != 'Any':
-            filtered['type_match'] = (filtered['job_type'] == user_profile['job_type']).astype(float)
-        else:
-            filtered['type_match'] = 0.5
+        df = self.data.copy()
 
-        # --- Location ---
-        if user_profile.get('location') and user_profile['location'] != 'Any':
-            filtered['location_match'] = filtered['job_location'].str.contains(
-                user_profile['location'], case=False, na=False
-            ).astype(float)
-        else:
-            filtered['location_match'] = 0.5
+        # --- Job level match ---
+        user_level = user_profile.get('job_level', 'Any')
+        df['level_match'] = 0.5
+        if user_level != 'Any' and 'job_level' in df.columns:
+            df['level_match'] = (df['job_level'] == user_level).astype(float)
+
+        # --- Job type match ---
+        user_type = user_profile.get('job_type', 'Any')
+        df['type_match'] = 0.5
+        if user_type != 'Any' and 'job_type' in df.columns:
+            df['type_match'] = (df['job_type'] == user_type).astype(float)
+
+        # --- Location match (fuzzy) ---
+        user_loc = user_profile.get('location', 'Any')
+        df['location_match'] = 0.5
+        if user_loc != 'Any' and 'job_location' in df.columns:
+            df['location_match'] = df['job_location'].apply(lambda x: self._location_match(user_loc, x))
 
         # --- Skills match ---
-        if user_profile.get('skills'):
-            filtered['skill_match'] = filtered['job_skills'].fillna('').apply(
-                lambda x: len(set(user_profile['skills']).intersection(set(s.strip() for s in x.split(',')))) / max(len(user_profile['skills']),1)
+        user_skills = [s.lower() for s in user_profile.get('skills', [])]
+        df['skill_match'] = 0.5
+        if user_skills and 'job_skills' in df.columns:
+            df['skill_match'] = df['job_skills'].apply(
+                lambda x: len(set(user_skills).intersection(set(self._normalize_skills(x)))) / max(len(user_skills),1)
             )
-        else:
-            filtered['skill_match'] = 0.5
 
         # --- Recent jobs boost (last 30 days) ---
         recent_threshold = datetime.now(timezone.utc) - timedelta(days=30)
-        if 'last_processed_time' in filtered.columns:
-            filtered['last_processed_time'] = pd.to_datetime(filtered['last_processed_time'], utc=True)
-            filtered['recent_boost'] = (filtered['last_processed_time'] >= recent_threshold).astype(float)
-        else:
-            filtered['recent_boost'] = 0.5
+        df['recent_boost'] = 0.5
+        if 'last_processed_time' in df.columns:
+            df['recent_boost'] = (df['last_processed_time'] >= recent_threshold).astype(float)
 
         # --- Remote/Hybrid preference ---
-        if user_profile.get('job_type') in ['Remote', 'Hybrid']:
-            filtered['remote_boost'] = (filtered['job_type'] == user_profile['job_type']).astype(float)
-        else:
-            filtered['remote_boost'] = 0.5
+        df['remote_boost'] = 0.5
+        if user_type in ['Remote', 'Hybrid'] and 'job_type' in df.columns:
+            df['remote_boost'] = (df['job_type'] == user_type).astype(float)
 
-        # --- Overall weighted score ---
-        filtered['kb_score'] = (
-            0.3*filtered['level_match'] +
-            0.2*filtered['type_match'] +
-            0.2*filtered['location_match'] +
-            0.1*filtered['skill_match'] +
-            0.1*filtered['recent_boost'] +
-            0.1*filtered['remote_boost']
+        # --- Compute overall weighted score ---
+        df['kb_score'] = (
+            0.3*df['level_match'] +
+            0.2*df['type_match'] +
+            0.2*df['location_match'] +
+            0.1*df['skill_match'] +
+            0.1*df['recent_boost'] +
+            0.1*df['remote_boost']
         )
 
-        # Include job_idx for hybrid recommender
-        filtered['job_idx'] = filtered.index
+        df['job_idx'] = df.index
 
-        top_jobs = filtered.sort_values(by='kb_score', ascending=False).head(n_recommendations)
+        # Return top N
+        top_jobs = df.sort_values(by='kb_score', ascending=False).head(n_recommendations)
         return top_jobs[['job_idx', 'kb_score']]

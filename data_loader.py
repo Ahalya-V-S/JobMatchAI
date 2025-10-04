@@ -32,10 +32,22 @@ class DataLoader:
                 st.error("No CSV files found in downloaded dataset.")
                 return None
 
-            # Merge all CSVs directly
-            merged_df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
-            merged_df.to_csv(merged_csv, index=False)
+            # Load all CSVs into a dictionary
+            dfs = {os.path.basename(f): pd.read_csv(f) for f in csv_files}
 
+            # Identify the main dataframe (the one with most columns)
+            main_name = max(dfs, key=lambda x: dfs[x].shape[1])
+            merged_df = dfs[main_name]
+
+            # Merge all others on 'job_link'
+            for name, df in dfs.items():
+                if name == main_name:
+                    continue
+                if "job_link" in df.columns and "job_link" in merged_df.columns:
+                    merged_df = merged_df.merge(df, on="job_link", how="left")
+
+            # Save merged dataset
+            merged_df.to_csv(merged_csv, index=False)
             st.success(f"Merged dataset saved: {merged_csv}")
             self.dataset_path = merged_csv
             return merged_csv
@@ -46,7 +58,6 @@ class DataLoader:
             else:
                 st.error(f"Failed to download dataset: {str(e)}")
             return None
-
 
     def load_data(self):
         """Load the LinkedIn jobs dataset"""
@@ -60,7 +71,7 @@ class DataLoader:
 
             # Load CSV
             try:
-                self.data = pd.read_csv(self.dataset_path, nrows=250000, low_memory=False)
+                self.data = pd.read_csv(self.dataset_path, nrows=500000, low_memory=False)
                 st.success(f"Loaded dataset with {len(self.data):,} rows")
                 st.info(f"Dataset shape: {self.data.shape}")
                 st.info(f"Columns: {', '.join(self.data.columns.tolist())}")

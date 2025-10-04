@@ -31,10 +31,11 @@ class HybridRecommender:
 
         recommendations = {}
 
+
         # --- Content-based ---
         if weights.get('content', 0) > 0:
             try:
-                cb_recs = self.content_filter.recommend(user_profile, n_recommendations*3)
+                cb_recs = self.content_filter.recommend(user_profile, n_recommendations)
                 if cb_recs is not None and not cb_recs.empty:
                     cb_recs = cb_recs.reset_index(drop=True)
                     if 'job_idx' not in cb_recs.columns:
@@ -47,7 +48,7 @@ class HybridRecommender:
         # --- Collaborative ---
         if weights.get('collaborative', 0) > 0:
             try:
-                cf_recs = self.collaborative_filter.recommend(user_profile, n_recommendations*3)
+                cf_recs = self.collaborative_filter.recommend(user_profile, n_recommendations)
                 if cf_recs is not None and not cf_recs.empty:
                     cf_recs = cf_recs.reset_index(drop=True)
                     if 'job_idx' not in cf_recs.columns:
@@ -60,7 +61,7 @@ class HybridRecommender:
         # --- Knowledge-based ---
         if weights.get('knowledge', 0) > 0:
             try:
-                kb_recs = self.knowledge_filter.recommend(user_profile, n_recommendations*3)
+                kb_recs = self.knowledge_filter.recommend(user_profile, n_recommendations)
                 if kb_recs is not None and not kb_recs.empty:
                     kb_recs = kb_recs.reset_index(drop=True)
                     if 'job_idx' not in kb_recs.columns:
